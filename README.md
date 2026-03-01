@@ -15,6 +15,34 @@ The system is designed as a decoupled, real-time client-server application optim
 
 ### Core Interaction Paradigm
 
+```mermaid
+graph TD
+    UI[Next.js Frontend] <-->|REST & WebSockets| GW[FastAPI Gateway]
+    GW <-->|Audio/Commands| CH[Chairman Handler]
+    CH <-->|WebRTC/Sockets| VP[LiveKit Voice Pipeline]
+    VP <-->|Gemini Live API| AI[Agent Array]
+    
+    subgraph "AI Agent Array (Cloud Run)"
+        SA[Scenario Analyst]
+        A1[Legal Agent]
+        A2[PR Agent]
+        A3[Engineer Agent]
+        WA[World Agent]
+        OA[Observer Agent]
+        
+        SA -.->|Initializes| A1
+        SA -.->|Initializes| A2
+        SA -.->|Initializes| A3
+    end
+    
+    A1 -->|Tools| CB[Shared Crisis Board]
+    A2 -->|Tools| CB
+    A3 -->|Tools| CB
+    
+    CB -->|Events| FS[(Firestore DB)]
+    FS -->|Snapshot Listener| GW
+```
+
 WAR ROOM relies heavily on **Event-Driven Architecture (EDA)** paired with **WebRTC and WebSockets** to maintain an immersive illusion of simultaneous agent presence. The backend acts as a single source of truth, generating state changes using autonomous background AI reasoning loops, which are then eagerly synced to the UI.
 
 ---
@@ -24,6 +52,32 @@ WAR ROOM relies heavily on **Event-Driven Architecture (EDA)** paired with **Web
 Communication between the frontend visualization layer and the backend entity-management layer is categorized into three distinct pipelines:
 
 ### 1. RESTful Pre-Fetching and State Hydration
+
+```mermaid
+sequenceDiagram
+    participant F as Next.js Frontend
+    participant GW as FastAPI Gateway
+    participant DB as Firestore
+    participant A as AI Agent Array
+    
+    Note over F,A: 1. REST Pre-Fetching
+    F->>GW: GET /api/sessions/{id}
+    GW->>DB: Query Session State
+    DB-->>GW: Return State
+    GW-->>F: JSON Initial State
+    
+    Note over F,A: 2. WebSocket Event Bus
+    A->>DB: Agent Action / Decision (Tool Call)
+    DB->>GW: Snapshot Listener Triggered
+    GW-->>F: Push Event (via ws://)
+    F-->>F: Update React Context/UI
+    
+    Note over F,A: 3. Audio & Voice Pipeline
+    F->>GW: Chairman Mic Audio
+    GW->>A: Stream to Gemini Live
+    A-->>GW: Agent Output (Text + Audio)
+    GW-->>F: Voice Audio + Active Speaker Sync
+```
 
 **Mechanism:** Standard HTTP/JSON APIs (e.g., `GET /api/sessions/{session_id}`).
 **Purpose:**
@@ -67,6 +121,34 @@ The most complex interaction layer, designed to handle "Gemini Live" bidirection
 * **`/backend/main.py` & `/gateway`:** REST/WS controllers routing traffic into the simulation.
 * **`/backend/agents`:** Isolated Python classes inheriting from a `BaseCrisisAgent`. Each agent maintains its own localized prompt memory and connects to Google's GenAI SDK independently to reason about incoming inputs.
 * **State Store (Firestore/Mock Database):** The centralized ledger mapping the state of the session, agent decisions, and historical actions, allowing for immediate session recovery and performance observability.
+
+```mermaid
+graph LR
+    subgraph "Isolated Agent Environment"
+        A[Legal Agent]
+        L[LlmAgent Wrapper]
+        M1[(Private Memory DB)]
+        A --- L
+        L --> M1
+    end
+    
+    subgraph "Shared Crisis Context"
+        SB[(Shared Session DB)]
+    end
+    
+    subgraph "Isolated Agent Environment"
+        B[PR Agent]
+        L2[LlmAgent Wrapper]
+        M2[(Private Memory DB)]
+        B --- L2
+        L2 --> M2
+    end
+    
+    L -- "Read/Write via Tools" --> SB
+    L2 -- "Read/Write via Tools" --> SB
+    
+    M1 -.->|No Access| M2
+```
 
 ---
 
