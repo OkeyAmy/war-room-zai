@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 type ThreatLevel = "CONTAINED" | "ELEVATED" | "CRITICAL" | "MELTDOWN";
 
 interface TopCommandBarProps {
   crisisTitle: string;
+  crisisDomain?: string;
+  crisisBrief?: string;
   threatLevel: ThreatLevel;
   micActive: boolean;
   sessionTimeLeft: number; // seconds
@@ -49,12 +51,30 @@ function formatTime(seconds: number) {
 
 export default function TopCommandBar({
   crisisTitle,
+  crisisDomain,
+  crisisBrief,
   threatLevel,
   micActive,
   sessionTimeLeft,
 }: TopCommandBarProps) {
   const [utcTime, setUtcTime] = useState("");
   const [gearHovered, setGearHovered] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const detailsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (detailsRef.current && !detailsRef.current.contains(event.target as Node)) {
+        setShowDetails(false);
+      }
+    }
+    if (showDetails) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showDetails]);
 
   useEffect(() => {
     const update = () => {
@@ -122,34 +142,103 @@ export default function TopCommandBar({
             flexShrink: 0,
           }}
         />
-        <div style={{ overflow: "hidden" }}>
+        <div style={{ position: "relative" }} ref={detailsRef}>
           <div
+            onClick={() => setShowDetails(!showDetails)}
             style={{
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontWeight: 400,
-              fontSize: "9px",
-              color: "#4A5568",
-              letterSpacing: "0.04em",
-              lineHeight: 1,
-            }}
-          >
-            CRISIS:
-          </div>
-          <div
-            style={{
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontWeight: 500,
-              fontSize: "11px",
-              color: "#8A9BB0",
-              maxWidth: "160px",
               overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              lineHeight: 1.3,
+              cursor: "pointer",
+              padding: "4px 8px 4px 0",
+              borderRadius: "4px",
+              transition: "background 200ms ease",
+              background: showDetails ? "rgba(255,255,255,0.05)" : "transparent"
             }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.02)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = showDetails ? "rgba(255,255,255,0.05)" : "transparent"}
           >
-            {crisisTitle}
+            <div
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontWeight: 400,
+                fontSize: "9px",
+                color: "#4A5568",
+                letterSpacing: "0.04em",
+                lineHeight: 1,
+              }}
+            >
+              CRISIS:
+            </div>
+            <div
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontWeight: 500,
+                fontSize: "11px",
+                color: "#8A9BB0",
+                maxWidth: "160px",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                lineHeight: 1.3,
+              }}
+            >
+              {crisisTitle}
+            </div>
           </div>
+
+          {showDetails && (
+            <div style={{
+              position: "absolute",
+              top: "100%",
+              left: 0,
+              marginTop: "8px",
+              width: "360px",
+              background: "#0D1117",
+              border: "1px solid #1E2D3D",
+              zIndex: 100,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+              display: "flex",
+              flexDirection: "column",
+            }}>
+              <div style={{
+                padding: "12px 16px",
+                borderBottom: "1px solid #1E2D3D",
+                background: "rgba(255,255,255,0.02)"
+              }}>
+                <h3 style={{
+                  margin: 0,
+                  fontFamily: "'Rajdhani', sans-serif",
+                  fontWeight: 700,
+                  fontSize: "16px",
+                  color: "#E8EDF2",
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase"
+                }}>{crisisTitle}</h3>
+                {crisisDomain && (
+                  <div style={{
+                    marginTop: "4px",
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: "10px",
+                    color: "#4A9EFF",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase"
+                  }}>
+                    DOMAIN: {crisisDomain}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: "16px" }}>
+                <p style={{
+                  margin: 0,
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: "12px",
+                  color: "#8A9BB0",
+                  lineHeight: 1.5
+                }}>
+                  {crisisBrief || "No briefing details available for this crisis."}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -249,6 +249,12 @@ export interface AgentDetailResponse extends AgentListItem {
     public_positions: Record<string, unknown>;
     statement_count: number;
     contradiction_count: number;
+    defining_line?: string;
+    agenda?: string;
+}
+
+export interface SkillResponse {
+    skill_md: string;
 }
 
 export interface VoicePodState {
@@ -413,6 +419,19 @@ export async function getAgentTranscript(
         { headers: authHeaders(token) }
     );
     return handle<TranscriptResponse>(res);
+}
+
+/** GET /api/sessions/{sid}/scenario/skill/{agent_id} */
+export async function getAgentSkill(
+    sessionId: string,
+    token: string,
+    agentId: string
+): Promise<SkillResponse> {
+    const res = await fetch(
+        `${API_BASE}/api/sessions/${sessionId}/scenario/skill/${agentId}`,
+        { headers: authHeaders(token) }
+    );
+    return handle<SkillResponse>(res);
 }
 
 // ── Pod routes ─────────────────────────────────────────────────────────────────

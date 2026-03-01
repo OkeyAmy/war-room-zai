@@ -229,6 +229,8 @@ async def get_agent(
         "public_positions": {},  # Extracted from transcripts by Observer
         "statement_count": statement_count,
         "contradiction_count": 0,
+        "defining_line": agent_entry.get("defining_line", ""),
+        "agenda": agent_entry.get("agenda", ""),
     }
 
 
