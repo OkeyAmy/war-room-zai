@@ -1,12 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
+
+interface AgentOption {
+  id: string;
+  name: string;
+}
 
 interface ChairmanCommandBarProps {
   onSendCommand: (command: string) => void;
   isMicActive: boolean;
   onToggleMic: () => void;
   commandHistory: string[];
+  /** Optional: display name for the Chairman (defaults to "CHAIRMAN") */
+  chairmanName?: string;
+  /** Optional: real agent list for the address-target dropdown */
+  agents?: AgentOption[];
 }
 
 export default function ChairmanCommandBar({
@@ -14,39 +23,18 @@ export default function ChairmanCommandBar({
   isMicActive,
   onToggleMic,
   commandHistory,
+  chairmanName = "CHAIRMAN",
+  agents,
 }: ChairmanCommandBarProps) {
   const [showDropdown, setShowDropdown] = useState(false);
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Simulate transcript when mic is active
-  useEffect(() => {
-    let t: any;
-    if (isMicActive) {
-      setTranscript("Listening...");
-      const mockPhrases = [
-        "Status report on hospital servers.",
-        "Authorize perimeter team deployment.",
-        "Lock decision 4 immediately.",
-        "Brief all agents on legal risk.",
-        "What is the current resolution score?"
-      ];
-      t = setInterval(() => {
-        setTranscript(mockPhrases[Math.floor(Math.random() * mockPhrases.length)]);
-      }, 3000);
-    } else {
-      setTranscript("");
-    }
-    return () => clearInterval(t);
-  }, [isMicActive]);
-
   const handleSend = () => {
-    const cmd = inputRef.current?.value || transcript;
-    if (cmd && cmd !== "Listening...") {
+    const cmd = (inputRef.current?.value || "").trim();
+    if (cmd) {
       onSendCommand(cmd);
       if (inputRef.current) inputRef.current.value = "";
-      setTranscript("");
     }
   };
 
@@ -104,7 +92,8 @@ export default function ChairmanCommandBar({
               zIndex: 110,
             }}
           >
-            {["FULL ROOM", "ATLAS", "NOVA", "CIPHER", "FELIX"].map((opt) => (
+            {/* FULL ROOM option */}
+            {["FULL ROOM", ...(agents ? agents.map(a => a.name.toUpperCase()) : ["ATLAS", "NOVA", "CIPHER", "FELIX"])].map((opt) => (
               <div
                 key={opt}
                 onClick={() => {
@@ -131,8 +120,7 @@ export default function ChairmanCommandBar({
 
       {/* Segment 2: Mic Button */}
       <button
-        onMouseDown={onToggleMic}
-        onMouseUp={onToggleMic}
+        onClick={onToggleMic}
         style={{
           width: "44px",
           height: "44px",
@@ -212,12 +200,12 @@ export default function ChairmanCommandBar({
             marginRight: "8px",
           }}
         >
-          CHAIRMAN:
+          {chairmanName.toUpperCase()}:
         </span>
         <input
           ref={inputRef}
           type="text"
-          placeholder={transcript || "Type or speak command..."}
+          placeholder={isMicActive ? "Listening..." : "Type or speak command..."}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
           style={{
             flex: 1,

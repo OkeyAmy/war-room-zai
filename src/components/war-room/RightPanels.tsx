@@ -32,6 +32,8 @@ interface RoomIntelligenceProps {
 }
 
 export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: RoomIntelligenceProps) {
+  const [open, setOpen] = useState(true);
+
   return (
     <div
       style={{
@@ -45,13 +47,16 @@ export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: 
         style={{
           height: "36px",
           padding: "0 12px",
-          borderBottom: "1px solid rgba(180,77,255,0.25)",
+          borderBottom: open ? "1px solid rgba(180,77,255,0.25)" : "none",
           background: "rgba(180,77,255,0.04)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          cursor: "pointer",
+          userSelect: "none",
         }}
+        onClick={() => setOpen((o) => !o)}
       >
         <span
           style={{
@@ -64,10 +69,10 @@ export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: 
         >
           ROOM INTELLIGENCE
         </span>
-        <span style={{ color: "#4A5568", fontSize: "12px" }}>ⓘ</span>
+        <span style={{ color: "#4A5568", fontSize: "10px", transition: "transform 150ms ease", display: "inline-block", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▼</span>
       </div>
 
-      <div className="wr-scrollbar" style={{ overflowY: "auto", maxHeight: "250px" }}>
+      {open && <div className="wr-scrollbar" style={{ overflowY: "auto", maxHeight: "250px" }}>
         {/* Alerts Section */}
         {alerts.length > 0 && alerts.map((alert) => (
           <div
@@ -80,14 +85,14 @@ export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: 
                 alert.type === "CONTRADICTION"
                   ? "#FF6B00"
                   : alert.type === "ALLIANCE"
-                  ? "#4A9EFF"
-                  : "#B44DFF",
+                    ? "#4A9EFF"
+                    : "#B44DFF",
               background:
                 alert.type === "CONTRADICTION"
                   ? "rgba(255,107,0,0.05)"
                   : alert.type === "ALLIANCE"
-                  ? "rgba(74,158,255,0.05)"
-                  : "rgba(180,77,255,0.05)",
+                    ? "rgba(74,158,255,0.05)"
+                    : "rgba(180,77,255,0.05)",
             }}
           >
             <div
@@ -100,16 +105,16 @@ export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: 
                   alert.type === "CONTRADICTION"
                     ? "#FF6B00"
                     : alert.type === "ALLIANCE"
-                    ? "#4A9EFF"
-                    : "#B44DFF",
+                      ? "#4A9EFF"
+                      : "#B44DFF",
                 marginBottom: "2px",
               }}
             >
               {alert.type === "CONTRADICTION"
                 ? "⚠️ CONTRADICTION"
                 : alert.type === "ALLIANCE"
-                ? "🤝 ALLIANCE FORMING"
-                : "🎯 CRITICAL UNASKED"}
+                  ? "🤝 ALLIANCE FORMING"
+                  : "🎯 CRITICAL UNASKED"}
             </div>
             <div
               style={{
@@ -234,7 +239,7 @@ export function RoomIntelligence({ items = [], alerts = [], trustScores = [] }: 
             ))}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -259,6 +264,8 @@ interface CrisisPostureProps {
 }
 
 export function CrisisPosture({ level = 1, label = "", detail = "", axes = [] }: CrisisPostureProps) {
+  const [open, setOpen] = useState(true);
+
   // Mock axes if none provided to follow design spec
   const displayAxes: PostureAxis[] = axes.length > 0 ? axes : [
     { label: "PUBLIC EXPOSURE", value: level * 20 - 10, status: level >= 4 ? "CRIT" : level >= 3 ? "HIGH" : "CONT", subMetric: "Viral velocity: RISING", trend: "UP" },
@@ -279,12 +286,15 @@ export function CrisisPosture({ level = 1, label = "", detail = "", axes = [] }:
         style={{
           height: "36px",
           padding: "0 12px",
-          borderBottom: "1px solid #1E2D3D",
+          borderBottom: open ? "1px solid #1E2D3D" : "none",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          cursor: "pointer",
+          userSelect: "none",
         }}
+        onClick={() => setOpen((o) => !o)}
       >
         <span
           style={{
@@ -297,32 +307,35 @@ export function CrisisPosture({ level = 1, label = "", detail = "", axes = [] }:
         >
           CRISIS POSTURE
         </span>
-        {label && (
-          <span
-            style={{
-              fontFamily: "'IBM Plex Mono', monospace",
-              fontSize: "9px",
-              padding: "2px 6px",
-              background: "rgba(255,107,0,0.2)",
-              color: "#FF6B00",
-              border: "1px solid #FF6B00",
-            }}
-          >
-            {label}
-          </span>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          {label && (
+            <span
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: "9px",
+                padding: "2px 6px",
+                background: "rgba(255,107,0,0.2)",
+                color: "#FF6B00",
+                border: "1px solid #FF6B00",
+              }}
+            >
+              {label}
+            </span>
+          )}
+          <span style={{ color: "#4A5568", fontSize: "10px", transition: "transform 150ms ease", display: "inline-block", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▼</span>
+        </div>
       </div>
 
-      <div className="wr-scrollbar" style={{ flex: 1, overflowY: "auto", maxHeight: "200px" }}>
+      {open && <div className="wr-scrollbar" style={{ flex: 1, overflowY: "auto", maxHeight: "200px" }}>
         {displayAxes.map((axis) => {
           const statusColor =
             axis.status === "CRIT"
               ? "#FF2D2D"
               : axis.status === "HIGH"
-              ? "#FF6B00"
-              : axis.status === "ELEV"
-              ? "#FFB800"
-              : "#00C896";
+                ? "#FF6B00"
+                : axis.status === "ELEV"
+                  ? "#FFB800"
+                  : "#00C896";
 
           return (
             <div
@@ -399,7 +412,7 @@ export function CrisisPosture({ level = 1, label = "", detail = "", axes = [] }:
             {detail}
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -431,23 +444,24 @@ export function ResolutionScore({
   keyDriver = "Team Alignment",
   nextEscalation = "04:59",
 }: ResolutionScoreProps) {
+  const [open, setOpen] = useState(true);
   const color =
     score >= 70
       ? "#00C896"
       : score >= 40
-      ? "#FFB800"
-      : score >= 20
-      ? "#FF6B00"
-      : "#FF2D2D";
+        ? "#FFB800"
+        : score >= 20
+          ? "#FF6B00"
+          : "#FF2D2D";
 
   const statusLabel =
     score >= 70
       ? "RESOLVED"
       : score >= 40
-      ? "RECOVERING"
-      : score >= 20
-      ? "CRITICAL"
-      : "MELTDOWN";
+        ? "RECOVERING"
+        : score >= 20
+          ? "CRITICAL"
+          : "MELTDOWN";
 
   const displayTrend = trend || (delta > 0 ? "IMPROVING" : delta < 0 ? "FALLING" : "STABLE");
 
@@ -464,12 +478,15 @@ export function ResolutionScore({
         style={{
           height: "36px",
           padding: "0 12px",
-          borderBottom: "1px solid #1E2D3D",
+          borderBottom: open ? "1px solid #1E2D3D" : "none",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           flexShrink: 0,
+          cursor: "pointer",
+          userSelect: "none",
         }}
+        onClick={() => setOpen((o) => !o)}
       >
         <span
           style={{
@@ -482,13 +499,16 @@ export function ResolutionScore({
         >
           RESOLUTION SCORE
         </span>
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-          <div className="dot-live" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FF2D2D" }} />
-          <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: "10px", color: "#FF2D2D" }}>LIVE</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <div className="dot-live" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#FF2D2D" }} />
+            <span style={{ fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, fontSize: "10px", color: "#FF2D2D" }}>LIVE</span>
+          </div>
+          <span style={{ color: "#4A5568", fontSize: "10px", transition: "transform 150ms ease", display: "inline-block", transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}>▼</span>
         </div>
       </div>
 
-      <div
+      {open && <div
         className="wr-scrollbar"
         style={{
           flex: 1,
@@ -547,33 +567,14 @@ export function ResolutionScore({
         <div style={{ width: "100%", marginTop: "12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
           {contributors.map((c) => (
             <div key={c.label} style={{ border: "1px solid #1E2D3D", padding: "4px", borderRadius: "1px" }}>
-               <div style={{ fontSize: "8px", color: "#4A5568", whiteSpace: "nowrap", overflow: "hidden" }}>{c.label.toUpperCase()}</div>
-               <div style={{ fontSize: "10px", fontWeight: 700, color: c.positive ? "#00C896" : "#FF2D2D", fontFamily: "'Orbitron', sans-serif" }}>
+              <div style={{ fontSize: "8px", color: "#4A5568", whiteSpace: "nowrap", overflow: "hidden" }}>{c.label.toUpperCase()}</div>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: c.positive ? "#00C896" : "#FF2D2D", fontFamily: "'Orbitron', sans-serif" }}>
                 {c.positive ? '+' : ''}{c.value}%
-               </div>
+              </div>
             </div>
           ))}
         </div>
-      </div>
-
-      <div
-        style={{
-          borderTop: "1px solid #1E2D3D",
-          padding: "8px 12px",
-          background: "#111820",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "9px", color: "#4A5568", marginBottom: "2px" }}>
-          Target: {targetText}
-        </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "9px", color: "#E8EDF2", marginBottom: "4px" }}>
-          Key driver: {keyDriver}
-        </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "10px", color: "#FF6B00", fontWeight: 500 }}>
-          Next escalation in: {nextEscalation}
-        </div>
-      </div>
+      </div>}
     </div>
   );
 }

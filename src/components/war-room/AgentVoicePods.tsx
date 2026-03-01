@@ -4,13 +4,16 @@ import { type Agent, type AgentStatus } from "./AgentRoster";
 
 interface AgentVoicePodsProps {
   agents: Agent[];
+  liveTranscripts?: Record<string, string>;
+  activeSpeakerId?: string | null;
+  onSummon?: () => void;
 }
 
 function Waveform({ status }: { status: AgentStatus }) {
   const isSpeaking = status === "speaking";
   const isConflicted = status === "conflicted";
   const bars = isSpeaking ? [1, 2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5];
-  
+
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: "2px", height: "28px", marginBottom: "6px" }}>
       {bars.map((i) => (
@@ -30,7 +33,7 @@ function Waveform({ status }: { status: AgentStatus }) {
   );
 }
 
-export default function AgentVoicePods({ agents }: AgentVoicePodsProps) {
+export default function AgentVoicePods({ agents, liveTranscripts = {}, activeSpeakerId = null, onSummon }: AgentVoicePodsProps) {
   return (
     <div
       style={{
@@ -101,9 +104,17 @@ export default function AgentVoicePods({ agents }: AgentVoicePodsProps) {
         }}
       >
         {agents.map((agent) => {
-          const isSpeaking = agent.status === "speaking";
-          const isThinking = agent.status === "thinking";
-          const isConflicted = agent.status === "conflicted";
+          // Derive display state from activeSpeakerId:
+          // If another agent is the active speaker, force this pod to 'listening'
+          const isActiveAgent = activeSpeakerId === agent.id;
+          const someoneElseSpeaking = activeSpeakerId !== null && !isActiveAgent;
+          const effectiveStatus = someoneElseSpeaking ? "listening" : agent.status;
+
+          const isSpeaking = effectiveStatus === "speaking";
+          const isThinking = effectiveStatus === "thinking";
+          const isConflicted = effectiveStatus === "conflicted";
+          // Dim non-active pods when someone else is speaking
+          const podOpacity = someoneElseSpeaking ? 0.5 : 1;
 
           return (
             <div
@@ -168,7 +179,23 @@ export default function AgentVoicePods({ agents }: AgentVoicePodsProps) {
                 )}
               </div>
 
-              {agent.lastWords && (
+              {(isSpeaking && liveTranscripts[agent.id]) ? (
+                <div
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontWeight: 400,
+                    fontSize: "10px",
+                    color: "#00E5FF",
+                    marginTop: "4px",
+                    overflow: "hidden",
+                    display: "-webkit-box",
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: "vertical",
+                  }}
+                >
+                  {liveTranscripts[agent.id]}
+                </div>
+              ) : agent.lastWords && (
                 <div
                   style={{
                     fontFamily: "'IBM Plex Mono', monospace",
@@ -203,6 +230,7 @@ export default function AgentVoicePods({ agents }: AgentVoicePodsProps) {
             cursor: "pointer",
             minHeight: "110px",
           }}
+          onClick={onSummon}
           onMouseEnter={(e) => {
             (e.currentTarget as HTMLDivElement).style.borderColor = "#4A9EFF";
             (e.currentTarget as HTMLDivElement).style.background = "rgba(74,158,255,0.04)";
