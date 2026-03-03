@@ -25,7 +25,7 @@ graph TD
     subgraph "AI Agent Array (Cloud Run)"
         SA[Scenario Analyst]
         A1[Legal Agent]
-        A2[PR Agent]
+        A2[CMO Agent]
         A3[Engineer Agent]
         WA[World Agent]
         OA[Observer Agent]
@@ -82,6 +82,7 @@ sequenceDiagram
 ```
 
 **Mechanism:** Standard HTTP/JSON APIs (e.g., `GET /api/sessions/{session_id}`).
+
 **Purpose:**
 When the frontend first loads a view or when a user forcefully refreshes the page, the Next.js application queries the backend's REST Gateway to construct the initial UI.
 

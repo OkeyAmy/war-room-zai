@@ -33,7 +33,7 @@ def build_scenario_instruction_guide(
         "3) Create four active speaking agents, each in an independent LiveKit pod.\n"
         "4) Generate SKILL instructions for each agent.\n"
         "5) Build LiveKit AgentSession parameters with STT-LLM-TTS pipeline:\n"
-        "   - STT provider: ElevenLabs (scribe_v1)\n"
+        "   - STT provider: ElevenLabs (scribe_v2_realtime)\n"
         "   - LLM provider: Gemini text model\n"
         "   - TTS provider: ElevenLabs\n"
         "6) Enable multimodality (audio + text + transcriptions).\n"
