@@ -41,3 +41,6 @@ project/
 .orchids/
 
 demo/
+
+# env
+.env*
