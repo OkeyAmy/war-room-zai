@@ -45,7 +45,7 @@ def _parse_env(path: Path) -> dict[str, str]:
 
 def _print_env_status(env: dict[str, str]) -> bool:
     required = [
-        "GOOGLE_API_KEY",
+        "ZAI_API_KEY",
         "LIVEKIT_URL",
         "LIVEKIT_API_KEY",
         "LIVEKIT_API_SECRET",
@@ -90,7 +90,7 @@ def test_livekit_environment():
     assert env_ok, "Missing required environment variables"
 
     settings = get_settings()
-    model_ok = settings.text_model == "gemini-3-flash-preview"
+    model_ok = bool(settings.zai_agent_model)
     backend_ok = settings.voice_backend == "livekit_elevenlabs"
 
     eleven_ok = False

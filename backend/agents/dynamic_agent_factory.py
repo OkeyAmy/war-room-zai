@@ -123,8 +123,7 @@ async def summon_agent(
         assigned_voice=assigned_voice,
     )
 
-    # Initialize ADK and Live session
-    agent.initialize_adk()
+    # Initialize Live voice session
     await agent.initialize_live_session()
 
     # Initialize memory
@@ -138,7 +137,7 @@ async def summon_agent(
         "previous_statements": [],
         "public_positions": {},
         "contradictions_detected": 0,
-        "adk_session_id": agent.adk_session_id,
+        "adk_session_id": str(uuid.uuid4()),
         "voice_name": assigned_voice,
         "voice_session_active": True,
     })

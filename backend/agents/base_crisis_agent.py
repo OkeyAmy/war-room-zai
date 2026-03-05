@@ -1,11 +1,10 @@
 """
 WAR ROOM — Base Crisis Agent
-Per voice.md: ONE agent = ONE Gemini Live session = ONE Firestore collection.
+Per voice.md: ONE agent = ONE LiveKit session = ONE Firestore collection.
 
 Each agent runs a PERSISTENT background loop:
-  _receive_from_gemini() → streams audio chunks + transcripts to frontend
-  _send_audio_to_gemini() → drains audio_in_queue from chairman mic
-  _autonomous_turn_trigger() → keeps discussion alive without chairman
+  _livekit_voice_loop() → ElevenLabs STT → Z.AI GLM LLM → ElevenLabs TTS → audio events
+  _introduce_on_join()  → opening character line on session start
 
 MEMORY ISOLATION:
   - self.live_session belongs to THIS agent only, NEVER shared
@@ -25,7 +24,7 @@ import random
 from datetime import datetime, timezone
 from typing import Optional
 
-from config.constants import ALLOWED_VOICE_POOL, GEMINI_FALLBACK_VOICES
+from config.constants import ALLOWED_VOICE_POOL
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -33,15 +32,12 @@ logger = logging.getLogger(__name__)
 
 class CrisisAgent:
     """
-    One CrisisAgent = one Gemini Live session = one Firestore collection.
+    One CrisisAgent = one LiveKit session = one Firestore collection.
 
-    AUDIO PIPELINE:
-      Gemini PCM → _receive_from_gemini() → push_event_direct(agent_audio_chunk)
-              → WS queue → browser AudioManager.playChunk() → speakers
-
-    CHAIRMAN AUDIO:
-      browser mic → WS binary → audio_in_queue → _send_audio_to_gemini()
-              → agent.live_session → Gemini processes → responds
+    AUDIO PIPELINE (livekit_elevenlabs mode):
+      chairman mic PCM → audio_in_queue → ElevenLabs STT
+              → Z.AI GLM text LLM → ElevenLabs TTS
+              → push_event_direct(agent_audio_chunk) → browser speakers
     """
 
     ALLOWED_VOICE_POOL = ALLOWED_VOICE_POOL
@@ -66,24 +62,13 @@ class CrisisAgent:
         self.turn_manager = turn_manager
         self.livekit_session_config = livekit_session_config or {}
 
-        # ADK session ID — unique per agent instance
-        self.adk_session_id = str(uuid.uuid4())
-
-        # Gemini Live session (opened by initialize_live_session)
+        # Live session presence marker
         self.live_session = None
-        self._live_ctx = None
 
         settings = get_settings()
-        self.live_model = settings.live_model
-        self.text_model = settings.text_model
         self.voice_backend = settings.voice_backend
         self.elevenlabs_stt_model = settings.elevenlabs_stt_model
         self.elevenlabs_tts_model = settings.elevenlabs_tts_model
-
-        # ADK (text mode — used for tool calls etc.)
-        self.session_service = None
-        self.llm_agent = None
-        self.runner = None
 
         # LiveKit ElevenLabs stack (optional backend mode)
         self._lk_stt = None
@@ -123,20 +108,14 @@ class CrisisAgent:
             allow_interruptions = self.livekit_session_config.get(
                 "voice_options", {}
             ).get("allow_interruptions", True)
+            settings = get_settings()
             return (
                 f"backend={self.voice_backend} "
                 f"stt=elevenlabs:{self.elevenlabs_stt_model} "
                 f"tts=elevenlabs:{self.elevenlabs_tts_model} "
                 f"voice_id={self.assigned_voice} "
-                f"llm={self.text_model} "
+                f"llm=zai:{settings.zai_agent_model} "
                 f"allow_interruptions={str(bool(allow_interruptions)).lower()}"
-            )
-        if self.live_session:
-            return (
-                f"backend=gemini_live "
-                f"realtime_model={self.live_model} "
-                f"voice={self.assigned_voice} "
-                f"llm={self.text_model}"
             )
         return f"backend=unavailable requested_backend={self.voice_backend}"
 
@@ -169,41 +148,16 @@ class CrisisAgent:
             )
         return self._crisis_ref
 
-    # ── ADK Setup ─────────────────────────────────────────────────────
+    # ── Z.AI Client ───────────────────────────────────────────────────
 
-    def initialize_adk(self):
-        """
-        Initialize the ADK LlmAgent, Runner, and SessionService.
-        Called during session bootstrapping.
-        """
-        try:
-            from google.adk.agents import LlmAgent
-            from google.adk.runners import Runner
-            from google.adk.sessions import InMemorySessionService
-
-            self.session_service = InMemorySessionService()
-            self.llm_agent = LlmAgent(
-                name=self.agent_id,
-                model=self.text_model,
-                instruction=self.skill_md,
-                description=self.role_config.get("role_title", "Crisis Agent"),
-                tools=self._build_tools(),
-            )
-            self.runner = Runner(
-                agent=self.llm_agent,
-                app_name=f"warroom_{self.session_id}",
-                session_service=self.session_service,
-            )
-            logger.info(f"ADK initialized for agent {self.agent_id}")
-
-        except ImportError:
-            logger.warning(
-                f"Google ADK not available — agent {self.agent_id} "
-                "initialized in local-dev mode (no LLM)"
-            )
-            self.session_service = _MockSessionService()
-            self.llm_agent = None
-            self.runner = None
+    def _get_zai_client(self):
+        """Return a configured OpenAI client pointing at Z.AI."""
+        from openai import OpenAI
+        settings = get_settings()
+        return OpenAI(
+            api_key=settings.zai_api_key,
+            base_url=settings.zai_base_url,
+        )
 
     def _build_tools(self) -> list:
         """Build the tool list. Tools are the ONLY way agents touch shared state."""
@@ -273,13 +227,13 @@ class CrisisAgent:
             _update_document_draft, _flag_deadline_risk,
         ]
 
-    # ── Gemini Live Session Setup ─────────────────────────────────────
+    # ── Voice Session Setup ───────────────────────────────────────────
 
     async def initialize_live_session(self):
         """
         Initialize per-agent voice runtime.
         Only supported runtime:
-          - LiveKit ElevenLabs STT/TTS plugins + Gemini text LLM
+          - LiveKit ElevenLabs STT/TTS plugins + Z.AI GLM text LLM
         """
         if self.voice_backend != "livekit_elevenlabs":
             logger.warning(
@@ -327,10 +281,11 @@ class CrisisAgent:
                         "(will be created by bootstrapper)"
                     )
 
+                settings = get_settings()
                 logger.info(
                     f"[VOICE] livekit_elevenlabs ready for {self.agent_id} "
                     f"(stt={self.elevenlabs_stt_model}, "
-                    f"tts={self.elevenlabs_tts_model}, llm={self.text_model})"
+                    f"tts={self.elevenlabs_tts_model}, llm=zai:{settings.zai_agent_model})"
                 )
                 return
             except Exception as e:
@@ -390,45 +345,8 @@ class CrisisAgent:
             logger.warning(f"[VOICE] {self.agent_id} failed to rebuild ElevenLabs TTS: {e}")
             return False
 
-    def _build_live_config(self, types):
-        """
-        Per-agent Live config. voice.md §1.2.
-        Each agent has its own unique voice — never shared.
-        Context window compression prevents token overflow in long sessions.
-        """
-        voice_name = self.assigned_voice
-        if voice_name not in GEMINI_FALLBACK_VOICES:
-            voice_name = "Kore"
-        return types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice_name
-                    )
-                )
-            ),
-            system_instruction=types.Content(
-                parts=[types.Part(text=self._build_live_system_prompt())],
-                role="user"
-            ),
-            # Transcription: needed for Observer Agent + transcript display
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            # Context window compression: prevents token overflow in long sessions
-            context_window_compression=types.ContextWindowCompressionConfig(
-                trigger_tokens=104857,
-                sliding_window=types.SlidingWindow(target_tokens=52428),
-            ),
-            # VAD: let Gemini detect natural speech endpoints
-            realtime_input_config=types.RealtimeInputConfig(
-                automatic_activity_detection=types.AutomaticActivityDetection(
-                    disabled=False,
-                )
-            ),
-        )
-
     def _build_live_system_prompt(self) -> str:
-        """System instruction injected into the Live session."""
+        """System instruction for the LLM."""
         role = self.role_config
         char = role.get("character_name", "Agent")
         title = role.get("role_title", "Advisor")
@@ -474,13 +392,11 @@ class CrisisAgent:
                 "(livekit_elevenlabs voice)"
             )
         else:
-            self._tasks = [
-                asyncio.create_task(self._receive_from_gemini(), name=f"{self.agent_id}_recv"),
-                asyncio.create_task(self._send_audio_to_gemini(), name=f"{self.agent_id}_audio"),
-                asyncio.create_task(self._autonomous_turn_trigger(), name=f"{self.agent_id}_auto"),
-                asyncio.create_task(self._kickoff_opening_turn(), name=f"{self.agent_id}_kickoff"),
-            ]
-            logger.info(f"[{self.agent_id}] Background tasks started (recv + audio + auto)")
+            # No supported runtime available — log warning and skip
+            logger.warning(
+                f"[{self.agent_id}] No supported voice runtime. "
+                "Live session unavailable."
+            )
 
     async def _introduce_on_join(self):
         """
@@ -526,7 +442,7 @@ class CrisisAgent:
         """
         Voice loop for:
           STT: LiveKit ElevenLabs STT
-          LLM: Gemini text model (gemini-3-flash-preview)
+          LLM: Z.AI GLM via OpenAI SDK
           TTS: LiveKit ElevenLabs TTS
         """
         logger.info(f"[{self.agent_id}] Starting livekit_elevenlabs voice loop")
@@ -589,7 +505,9 @@ class CrisisAgent:
         return ""
 
     async def _generate_llm_reply(self, user_text: str) -> str:
-        from google import genai
+        settings = get_settings()
+        if not settings.zai_api_key:
+            return "[LLM unavailable — ZAI_API_KEY not configured]"
 
         crisis_brief = await self._read_crisis_brief()
         history = self._render_conversation_history()
@@ -598,38 +516,45 @@ class CrisisAgent:
             if self._introduced else
             "If this is your first speaking turn, introduce yourself once in one sentence."
         )
-        prompt = (
+        system_prompt = (
             f"{self.skill_md}\n\n"
-            f"[ROLE] {self.role_config.get('character_name', 'Agent')} "
-            f"({self.role_config.get('role_title', 'Advisor')})\n"
-            f"[CRISIS BRIEF]\n{crisis_brief}\n\n"
-            f"[RECENT CONVERSATION]\n{history}\n\n"
-            f"[INPUT]\n{user_text}\n\n"
-            "Respond in character as spoken dialogue only.\n"
-            "Do NOT print JSON, markdown code fences, tool call lists, or function-call arguments.\n"
-            f"{intro_rule}\n"
-            "Continue the current conversation; do not reset context.\n"
-            "Use 2-4 sentences.\n"
+            f"VOICE PERSONA: You are {self.role_config.get('character_name', 'Agent')}, "
+            f"the {self.role_config.get('role_title', 'Advisor')}.\n"
+            f"CRISIS BRIEF:\n{crisis_brief}\n\n"
+            "Respond in character as spoken dialogue only. "
+            "Do NOT print JSON, markdown code fences, tool call lists, or function-call arguments. "
+            f"{intro_rule} "
+            "Continue the current conversation; do not reset context. "
+            "Use 2-4 sentences. "
             "In single-agent mode, do not fabricate debate with other agents unless explicitly asked."
         )
 
-        models_to_try = [self.text_model, "gemini-2.5-flash", "gemini-2.0-flash"]
-        for model_name in models_to_try:
-            try:
-                client = genai.Client()
-                result = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                text = self._sanitize_agent_reply(
-                    (getattr(result, "text", None) or "").strip()
-                )
-                if text:
-                    return text
-            except Exception as e:
-                logger.warning(
-                    f"[{self.agent_id}] LLM generation failed model={model_name}: {e}"
-                )
+        messages = [
+            {"role": "system", "content": system_prompt},
+        ]
+        # Include recent history as alternating user/assistant turns
+        for item in self._conversation_history[-8:]:
+            role = item.get("role", "user")
+            turn_role = "user" if role == "chairman" else "assistant"
+            messages.append({"role": turn_role, "content": item.get("text", "")})
+        messages.append({"role": "user", "content": user_text})
+
+        try:
+            client = self._get_zai_client()
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=settings.zai_agent_model,
+                messages=messages,
+                temperature=0.88,
+                max_tokens=600,
+            )
+            text = self._sanitize_agent_reply(
+                (response.choices[0].message.content or "").strip()
+            )
+            if text:
+                return text
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Z.AI LLM generation failed: {e}")
 
         return "We are out of alignment. I need one concrete proposal from the room right now."
 
@@ -825,254 +750,7 @@ class CrisisAgent:
                 if holding_turn and self.turn_manager:
                     self.turn_manager.release_turn(self.agent_id)
 
-    async def _receive_from_gemini(self):
-        """
-        PERSISTENT LOOP: Reads audio chunks + transcripts from Gemini Live.
 
-        Per voice.md §1.4:
-          response.data  → raw PCM bytes → base64 encode → WS event → browser plays
-          response.text  → transcript chunk → WS event → UI display + Observer
-
-        TURN MANAGEMENT:
-          When the first audio chunk arrives, we acquire the turn from the
-          TurnManager.  If another agent already holds the floor, we wait
-          (with a timeout) before emitting audio.  The turn is released on
-          turn_complete or interruption.
-
-        AUDIO FIELD: We use 'audio_b64' in the event payload to match
-        the frontend useWarRoomSocket handler.
-        """
-        from utils.events import push_event, push_event_direct
-        from config.constants import (
-            EVENT_AGENT_THINKING, EVENT_AGENT_SPEAKING_START,
-            EVENT_AGENT_SPEAKING_CHUNK, EVENT_AGENT_SPEAKING_END,
-            EVENT_AGENT_INTERRUPTED, EVENT_AGENT_STATUS_CHANGE,
-        )
-
-        logger.info(f"[{self.agent_id}] Starting receive loop")
-
-        while self._running and self.live_session:
-            # Session ended: stop all audio loops immediately
-            if self.turn_manager and self.turn_manager.is_session_ended():
-                break
-            holding_turn = False
-            try:
-                # Signal: agent is thinking/ready
-                await push_event(self.session_id, EVENT_AGENT_THINKING, {
-                    "agent_id": self.agent_id,
-                })
-
-                full_transcript = ""
-                audio_chunk_count = 0
-
-                async for response in self.live_session.receive():
-
-                    # ── CHECK YIELD (turn manager) ────────────────────
-                    if (
-                        holding_turn
-                        and self.turn_manager
-                        and self.turn_manager.should_yield(self.agent_id)
-                    ):
-                        # Chairman interrupted — stop speaking
-                        logger.info(f"[{self.agent_id}] Yielding floor (chairman interrupt)")
-                        self.turn_manager.release_turn(self.agent_id)
-                        holding_turn = False
-                        await push_event(self.session_id, EVENT_AGENT_INTERRUPTED, {
-                            "agent_id": self.agent_id,
-                        })
-                        await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
-                            "agent_id": self.agent_id,
-                            "status": "listening",
-                        })
-                        await self._clear_audio_buffer()
-                        break
-
-                    # ── INTERRUPTED ───────────────────────────────────
-                    if (
-                        response.server_content
-                        and response.server_content.interrupted
-                    ):
-                        if holding_turn and self.turn_manager:
-                            self.turn_manager.release_turn(self.agent_id)
-                            holding_turn = False
-                        await push_event(self.session_id, EVENT_AGENT_INTERRUPTED, {
-                            "agent_id": self.agent_id,
-                        })
-                        await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
-                            "agent_id": self.agent_id,
-                            "status": "listening",
-                        })
-                        logger.info(f"[{self.agent_id}] Interrupted")
-                        # Clear any buffered audio
-                        await self._clear_audio_buffer()
-                        break
-
-                    # ── AUDIO CHUNK ───────────────────────────────────
-                    # response.data = raw PCM 24kHz 16-bit mono bytes
-                    if response.data:
-                        # Base64-encode for JSON WebSocket transport
-                        audio_b64 = base64.b64encode(response.data).decode()
-                        audio_chunk_count += 1
-
-                        # First chunk → acquire turn + update UI to "speaking"
-                        if audio_chunk_count == 1:
-                            # IMMEDIATE-DROP: if someone else already holds the floor,
-                            # discard this response rather than blocking for 15s.
-                            # This prevents overlapping voices while keeping latency low.
-                            if self.turn_manager:
-                                # try_acquire_turn is now a proper coroutine that
-                                # atomically checks + acquires the lock.
-                                acquired = await self.turn_manager.try_acquire_turn(
-                                    self.agent_id
-                                )
-                                if not acquired:
-                                    logger.info(
-                                        f"[{self.agent_id}] Could not acquire floor "
-                                        "— dropping response"
-                                    )
-                                    break
-                                holding_turn = True
-
-                            await push_event(self.session_id, EVENT_AGENT_SPEAKING_START, {
-                                "agent_id": self.agent_id,
-                                "character_name": self.role_config.get("character_name", "Agent"),
-                                "voice_name": self.assigned_voice,
-                            })
-                            await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
-                                "agent_id": self.agent_id,
-                                "status": "speaking",
-                                "previous_status": "thinking",
-                            })
-
-                        # Direct push — skip Firestore (too slow for audio)
-                        # FIELD NAME: 'audio_b64' matches frontend useWarRoomSocket
-                        await push_event_direct(
-                            self.session_id,
-                            "agent_audio_chunk",
-                            {
-                                "agent_id": self.agent_id,
-                                "audio_b64": audio_b64,
-                                "sample_rate": 24000,
-                                "channels": 1,
-                                "bit_depth": 16,
-                            },
-                            source_agent_id=self.agent_id,
-                        )
-
-                    # ── TRANSCRIPT CHUNK ──────────────────────────────
-                    # output_transcription gives us text of what agent said
-                    if (
-                        response.server_content
-                        and response.server_content.output_transcription
-                    ):
-                        chunk = response.server_content.output_transcription.text
-                        if chunk:
-                            full_transcript += chunk
-                            await push_event_direct(
-                                self.session_id,
-                                EVENT_AGENT_SPEAKING_CHUNK,
-                                {
-                                    "agent_id": self.agent_id,
-                                    "transcript_chunk": chunk,
-                                },
-                                source_agent_id=self.agent_id,
-                            )
-
-                    # Also handle response.text (some SDK versions use this)
-                    if response.text:
-                        full_transcript += response.text
-                        await push_event_direct(
-                            self.session_id,
-                            EVENT_AGENT_SPEAKING_CHUNK,
-                            {
-                                "agent_id": self.agent_id,
-                                "transcript_chunk": response.text,
-                            },
-                            source_agent_id=self.agent_id,
-                        )
-
-                    # ── TURN COMPLETE ─────────────────────────────────
-                    if (
-                        response.server_content
-                        and response.server_content.turn_complete
-                    ):
-                        # Release the speaking floor
-                        if holding_turn and self.turn_manager:
-                            self.turn_manager.release_turn(self.agent_id)
-                            holding_turn = False
-
-                        if audio_chunk_count > 0:
-                            await push_event(self.session_id, EVENT_AGENT_SPEAKING_END, {
-                                "agent_id": self.agent_id,
-                                "full_transcript": full_transcript,
-                                "audio_chunks": audio_chunk_count,
-                            })
-                            await push_event(self.session_id, EVENT_AGENT_STATUS_CHANGE, {
-                                "agent_id": self.agent_id,
-                                "status": "listening",
-                                "previous_status": "speaking",
-                            })
-
-                            # Process turn completion
-                            if full_transcript:
-                                asyncio.create_task(
-                                    self._on_turn_complete(full_transcript)
-                                )
-
-                        logger.info(
-                            f"[{self.agent_id}] Turn complete: "
-                            f"{audio_chunk_count} chunks, {len(full_transcript)} chars"
-                        )
-                        break
-
-            except asyncio.CancelledError:
-                if holding_turn and self.turn_manager:
-                    self.turn_manager.release_turn(self.agent_id)
-                break
-            except Exception as e:
-                if holding_turn and self.turn_manager:
-                    self.turn_manager.release_turn(self.agent_id)
-                    holding_turn = False
-                logger.error(f"[{self.agent_id}] Receive loop error: {e}")
-                await asyncio.sleep(1)  # Brief pause before retry
-
-            # Post-turn cooldown: prevent the loop from immediately
-            # restarting and picking up a new Gemini response before
-            # other agents have a chance to acquire the floor.
-            await asyncio.sleep(0.5)
-
-        logger.info(f"[{self.agent_id}] Receive loop ended")
-
-    async def _send_audio_to_gemini(self):
-        """
-        PERSISTENT LOOP: Drains audio_in_queue and sends PCM to agent's Live session.
-        Per voice.md §1.6 — chairman mic goes into audio_in_queue, this drains it.
-
-        ISOLATION: Only runs for THIS agent's queue. Other agents' queues are separate.
-        """
-        from google.genai import types
-
-        logger.info(f"[{self.agent_id}] Starting audio send loop")
-
-        while self._running and self.live_session:
-            try:
-                # Wait up to 1s for a chunk (allows _running check)
-                try:
-                    pcm_bytes = await asyncio.wait_for(
-                        self.audio_in_queue.get(), timeout=1.0
-                    )
-                except asyncio.TimeoutError:
-                    continue
-
-                if pcm_bytes and self.live_session:
-                    await self.live_session.send_realtime_input(
-                        media=types.Blob(data=pcm_bytes, mime_type="audio/pcm;rate=16000")
-                    )
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"[{self.agent_id}] Audio send error: {e}")
-                await asyncio.sleep(0.5)
 
     async def _autonomous_turn_trigger(self):
         """
@@ -1171,20 +849,10 @@ class CrisisAgent:
 
     async def send_text(self, text: str) -> None:
         """
-        Send text to the agent's Live session.
-        Uses send_realtime_input to avoid 1008 policy violations caused by interleaving 
-        LiveClientContent with VAD-enabled audio sessions.
+        Send text to the agent's voice loop queue.
+        For livekit_elevenlabs mode this queues to text_in_queue.
         """
-        if self._lk_stt and self._lk_tts:
-            await self.text_in_queue.put(text)
-            return
-
-        if self.live_session:
-            import websockets
-            try:
-                await self.live_session.send_realtime_input(text=text)
-            except websockets.exceptions.ConnectionClosed:
-                logger.warning(f"Agent {self.agent_id} websocket closed, could not send text: {text[:20]}...")
+        await self.text_in_queue.put(text)
 
     async def send_audio(self, audio_data: bytes) -> None:
         """Send raw PCM audio to the agent's Live session."""
@@ -1284,7 +952,7 @@ class CrisisAgent:
     # ── Lifecycle ────────────────────────────────────────────────────
 
     async def close(self) -> None:
-        """Clean up: cancel background tasks and close Live session."""
+        """Clean up: cancel background tasks and close voice session."""
         self._running = False
 
         # Cancel all background tasks
@@ -1294,14 +962,8 @@ class CrisisAgent:
             await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
 
-        # Close Live session
-        if self._live_ctx:
-            try:
-                await self._live_ctx.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._live_ctx = None
-            self.live_session = None
+        # Mark live session as closed
+        self.live_session = None
 
         if self._lk_stt:
             try:
@@ -1322,8 +984,6 @@ class CrisisAgent:
             except Exception:
                 pass
             self._lk_http_session = None
-        if not self._live_ctx:
-            self.live_session = None
 
         try:
             await self.memory_ref.update({"voice_session_active": False})
@@ -1331,8 +991,3 @@ class CrisisAgent:
             pass
 
         logger.info(f"[{self.agent_id}] Closed cleanly")
-
-
-class _MockSessionService:
-    """Minimal mock for when ADK is not installed."""
-    pass

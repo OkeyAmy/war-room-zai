@@ -2,6 +2,8 @@
 WAR ROOM — Scenario Analyst Agent
 Runs ONCE at session start. Analyzes the crisis input and outputs
 a complete ScenarioSpec JSON that initializes the entire crisis team.
+
+Uses Z.AI GLM-5 via OpenAI-compatible SDK.
 """
 
 from __future__ import annotations
@@ -96,6 +98,16 @@ Rules:
 """
 
 
+def _get_zai_client():
+    """Return a configured OpenAI client pointing at Z.AI."""
+    from openai import OpenAI
+    settings = get_settings()
+    return OpenAI(
+        api_key=settings.zai_api_key,
+        base_url=settings.zai_base_url,
+    )
+
+
 async def run_scenario_analyst(
     crisis_input: str,
     session_id: str,
@@ -113,6 +125,7 @@ async def run_scenario_analyst(
     Returns:
         dict matching the ScenarioSpec schema.
     """
+    import asyncio
     settings = get_settings()
 
     # Build uploaded context section for the prompt
@@ -120,75 +133,48 @@ async def run_scenario_analyst(
     if uploaded_context:
         uploaded_section = f"UPLOADED DOCUMENT CONTEXT:\n{uploaded_context}"
 
+    if not settings.zai_api_key:
+        logger.warning("ZAI_API_KEY not set — returning mock scenario")
+        return _generate_mock_scenario(crisis_input, session_id)
+
     try:
-        from google.adk.agents import LlmAgent
-        from google.adk.runners import Runner
-        from google.adk.sessions import InMemorySessionService
-        from google.genai import types
+        client = _get_zai_client()
 
-        session_service = InMemorySessionService()
-
-        analyst = LlmAgent(
-            name="ScenarioAnalyst",
-            model=settings.text_model,
-            instruction=SCENARIO_ANALYST_INSTRUCTION.format(
-                crisis_input=crisis_input,
-                uploaded_context_section=uploaded_section,
-            ),
-            output_schema=ScenarioSpec,
+        system_prompt = SCENARIO_ANALYST_INSTRUCTION.format(
+            crisis_input=crisis_input,
+            uploaded_context_section=uploaded_section,
         )
 
-        runner = Runner(
-            agent=analyst,
-            app_name=f"analyst_{session_id}",
-            session_service=session_service,
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=settings.zai_scenario_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Analyze this crisis and return the full scenario JSON: {crisis_input}"},
+            ],
+            temperature=0.85,
+            max_tokens=4000,
+            response_format={"type": "json_object"},
         )
 
-        # Create the session in the InMemorySessionService BEFORE calling run_async.
-        # Without this, the runner raises "Session not found".
-        analyst_session_id = f"analyst_{session_id}"
-        await session_service.create_session(
-            app_name=f"analyst_{session_id}",
-            user_id="system",
-            session_id=analyst_session_id,
-        )
-
-        # runner.run_async() returns an AsyncGenerator of events, NOT an awaitable.
-        # We iterate to capture the final response text.
-        final_response_text = ""
-        async for event in runner.run_async(
-            user_id="system",
-            session_id=analyst_session_id,
-            new_message=types.Content(
-                role="user",
-                parts=[types.Part(text=f"Analyze this crisis: {crisis_input}")]
-            ),
-        ):
-            if event.is_final_response() and event.content and event.content.parts:
-                final_response_text = event.content.parts[0].text
-
-        if not final_response_text:
-            logger.warning("Scenario Analyst returned no final response — using mock")
+        content = response.choices[0].message.content
+        if not content:
+            logger.warning("Scenario Analyst returned empty response — using mock")
             return _generate_mock_scenario(crisis_input, session_id)
 
-        scenario = json.loads(final_response_text)
-        # MULTI-AGENT: commented out single-agent truncation — now supports 4 agents
-        # Hard guarantee: scenario bootstrap currently supports strict single-agent voice.
-        # agents = scenario.get("agents", [])
-        # if isinstance(agents, list):
-        #     scenario["agents"] = agents[:1]
+        scenario = json.loads(content)
         logger.info(f"Scenario Analyst produced: {scenario.get('crisis_title', 'Unknown')}")
         return scenario
 
-    except ImportError:
-        logger.warning("Google ADK not available — returning mock scenario")
+    except Exception as e:
+        logger.warning(f"Scenario Analyst failed ({e}) — returning mock scenario")
         return _generate_mock_scenario(crisis_input, session_id)
 
 
 def _generate_mock_scenario(crisis_input: str, session_id: str) -> dict:
     """
     Generate a mock scenario for local development/testing
-    when ADK is not available.
+    when Z.AI is not available.
     MULTI-AGENT: expanded from 1 agent to 4 independent agents.
     v2.0: enriched agent profiles + required_documents.
     """

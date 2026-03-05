@@ -1,6 +1,6 @@
 """
 WAR ROOM — Document Engine
-Finalizes response documents at session end using Gemini 3.0 Pro.
+Finalizes response documents at session end using Z.AI GLM-5 via OpenAI SDK.
 Collects agent draft sections and session context, then produces
 polished deliverables (regulatory notifications, executive briefings, etc.).
 """
@@ -21,8 +21,7 @@ from config.constants import (
 logger = logging.getLogger(__name__)
 
 # ── Finalization Model ───────────────────────────────────────────────────
-# Uses Gemini 3.0 Pro for complex document finalization tasks.
-# Falls back to gemini-2.5-flash if 3.0 is unavailable.
+# Uses Z.AI GLM-5 (zai_scenario_model) for complex document finalization.
 
 FINALIZATION_PROMPT = """\
 You are the Document Finalization Engine for WAR ROOM.
@@ -138,7 +137,7 @@ async def finalize_document(
     session_data: dict,
 ) -> dict:
     """
-    Finalize a single document using Gemini 3.0 Pro.
+    Finalize a single document using Z.AI GLM-5.
 
     Args:
         doc_spec: The document specification (from required_documents).
@@ -180,28 +179,44 @@ async def finalize_document(
         threat_level=session_data.get("threat_level", "elevated"),
     )
 
-    # Try Gemini 3.0 Pro first, then fall back
-    models_to_try = ["gemini-3.1-flash-lite-preview", "gemini-2.5-pro", "gemini-flash-latest"]
     content = ""
 
-    for model_name in models_to_try:
+    if settings.zai_api_key:
         try:
-            from google import genai
-            client = genai.Client()
-            result = client.models.generate_content(
-                model=model_name,
-                contents=prompt,
+            from openai import OpenAI
+
+            client = OpenAI(
+                api_key=settings.zai_api_key,
+                base_url=settings.zai_base_url,
             )
-            content = (getattr(result, "text", None) or "").strip()
+
+            response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model=settings.zai_scenario_model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"You are a specialist document writer for crisis incident response. "
+                            f"You follow {doc_spec.get('legal_framework', 'best practices')} precisely. "
+                            f"Produce professional, legally accurate documents. No meta-commentary."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=3000,
+            )
+
+            content = (response.choices[0].message.content or "").strip()
             if content:
-                logger.info(f"Document '{title}' finalized with model={model_name}")
-                break
+                logger.info(f"Document '{title}' finalized with Z.AI {settings.zai_scenario_model}")
         except Exception as e:
-            logger.warning(f"Document finalization failed with {model_name}: {e}")
+            logger.warning(f"Document finalization failed: {e}")
 
     if not content:
         content = f"[DOCUMENT FINALIZATION PENDING]\n\nDraft sections:\n{draft_text}"
-        logger.warning(f"All models failed for document '{title}', using draft fallback")
+        logger.warning(f"Finalization unavailable for document '{title}', using draft fallback")
 
     return {
         "doc_id": doc_id,

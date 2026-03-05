@@ -1,11 +1,14 @@
 """
 WAR ROOM — Document Intake (Multimodal)
-Processes uploaded files (PDFs, images, text) using Gemini 2.5 Flash
+Processes uploaded files (PDFs, images, text) using Z.AI GLM-4.6V
 to extract crisis-relevant context before scenario generation.
+
+Uses Z.AI via OpenAI-compatible SDK.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import mimetypes
@@ -43,7 +46,7 @@ async def process_uploaded_documents(
     files: list[dict],
 ) -> str:
     """
-    Process uploaded files using Gemini 2.5 Flash multimodal.
+    Process uploaded files using Z.AI GLM-4.6V multimodal.
 
     Args:
         files: List of dicts with keys:
@@ -57,7 +60,6 @@ async def process_uploaded_documents(
     if not files:
         return ""
 
-    settings = get_settings()
     extracted_parts = []
 
     for file_info in files:
@@ -91,9 +93,11 @@ async def _extract_from_file(
     content_type: str,
 ) -> str:
     """
-    Extract text content from a single file using Gemini 2.5 Flash.
+    Extract text content from a single file using Z.AI GLM.
 
-    Supports: PDFs, images (PNG, JPEG, WebP), text files, markdown.
+    Supports:
+    - Plain text / markdown: decoded directly (no LLM needed)
+    - Binary files (PDF, images): Z.AI GLM-4.6V multimodal vision call
     """
     # For plain text files, just decode directly
     if content_type.startswith("text/"):
@@ -102,46 +106,53 @@ async def _extract_from_file(
         except Exception:
             return content.decode("latin-1", errors="replace")
 
-    # For binary files (PDF, images), use Gemini multimodal
-    models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro"]
+    # For binary files (PDF, images), use Z.AI multimodal
+    settings = get_settings()
+    if not settings.zai_api_key:
+        logger.warning("ZAI_API_KEY not set — cannot process binary file via vision LLM")
+        return f"[Could not extract content from {filename}: ZAI_API_KEY not configured]"
 
-    for model_name in models_to_try:
-        try:
-            from google import genai
-            from google.genai import types
+    try:
+        from openai import OpenAI
 
-            client = genai.Client()
-            b64_content = base64.b64encode(content).decode("utf-8")
+        client = OpenAI(
+            api_key=settings.zai_api_key,
+            base_url=settings.zai_base_url,
+        )
 
-            result = client.models.generate_content(
-                model=model_name,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(
-                                inline_data=types.Blob(
-                                    mime_type=content_type,
-                                    data=b64_content,
-                                )
-                            ),
-                            types.Part(
-                                text=(
-                                    f"Extract all crisis-relevant information from this "
-                                    f"file ({filename}). Include key facts, dates, names, "
-                                    f"figures, legal references, and risk factors. "
-                                    f"Be thorough and structured."
-                                )
-                            ),
-                        ],
-                    )
+        b64_content = base64.b64encode(content).decode("utf-8")
+        data_url = f"data:{content_type};base64,{b64_content}"
+
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model=settings.zai_vision_model,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": data_url},
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            f"{INTAKE_PROMPT}\n\n"
+                            f"File: {filename}\n"
+                            f"Extract all crisis-relevant information from this file. "
+                            f"Include key facts, dates, names, figures, legal references, and risk factors. "
+                            f"Be thorough and structured."
+                        ),
+                    },
                 ],
-            )
-            text = (getattr(result, "text", None) or "").strip()
-            if text:
-                return text
-        except Exception as e:
-            logger.warning(f"Intake extraction failed with {model_name} for {filename}: {e}")
+            }],
+            max_tokens=3000,
+        )
+
+        text = (response.choices[0].message.content or "").strip()
+        if text:
+            return text
+    except Exception as e:
+        logger.warning(f"Intake extraction failed for {filename}: {e}")
 
     return f"[Could not extract content from {filename}]"
 

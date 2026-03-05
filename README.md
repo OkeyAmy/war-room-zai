@@ -20,7 +20,8 @@ graph TD
     UI[Next.js Frontend] <-->|REST & WebSockets| GW[FastAPI Gateway]
     GW <-->|Audio/Commands| CH[Chairman Handler]
     CH <-->|WebRTC/Sockets| VP[LiveKit Voice Pipeline]
-    VP <-->|Gemini Live API| AI[Agent Array]
+    VP <-->|ElevenLabs STT/TTS| AI[Agent Array]
+    AI <-->|OpenAI SDK| ZAI[Z.AI GLM Models]
     
     subgraph "AI Agent Array (Cloud Run)"
         SA[Scenario Analyst]
@@ -76,8 +77,10 @@ sequenceDiagram
     
     Note over F,A: 3. Audio & Voice Pipeline
     F->>GW: Chairman Mic Audio
-    GW->>A: Stream to Gemini Live
-    A-->>GW: Agent Output (Text + Audio)
+    GW->>A: LiveKit STT (ElevenLabs)
+    A->>ZAI: Prompt Z.AI GLM
+    ZAI-->>A: Text Response
+    A->>GW: LiveKit TTS (ElevenLabs)
     GW-->>F: Voice Audio + Active Speaker Sync
 ```
 
@@ -102,11 +105,11 @@ Because crisis agents (e.g., Legal, PR, Military) and the "World Agent" act auto
 
 **Mechanism:** WebSockets and LiveKit (WebRTC).
 **Purpose:**
-The most complex interaction layer, designed to handle "Gemini Live" bidirectional voice streams between the user and the AI array.
+The most complex interaction layer, designed to handle bidirectional voice streams between the user and the AI array using LiveKit and ElevenLabs.
 
 * **Client-to-Server:** The Next.js frontend captures the Chairman's microphone hardware, encodes the audio, and streams it via WebSocket directly to the `chairman_audio_ws.py` router on the backend.
-* **Backend Transcription & Routing:** The backend receives the chunked audio, pipes it to the Gemini Live API for STT (Speech-to-Text) and intent reasoning, determines *which* AI agent should react, and triggers their specific logic loop.
-* **Server-to-Client Audio:** Once an agent determines their response, the text is synthesized into ultra-realistic speech using ElevenLabs. This generated audio is then piped back to the frontend (either via LiveKit rooms or direct binary WebSocket chunks).
+* **Backend Transcription & Routing:** The backend receives the chunked audio, pipes it to ElevenLabs for STT (Speech-to-Text). The transcript is then sent to the Z.AI GLM API for intent reasoning, determining *which* AI agent should react, and triggering their specific logic loop.
+* **Server-to-Client Audio:** Once an agent determines their response, the text is synthesized into ultra-realistic speech using ElevenLabs TTS. This generated audio is then piped back to the frontend (either via LiveKit rooms or direct binary WebSocket chunks).
 * **Active Speaker Gating:** To prevent chaotic "voice leakage" where multiple AIs talk simultaneously, the architecture enforces strict turn-based speaking locks. The backend emits active-speaker tokens, ensuring the frontend's audio player drops chunk overlaps and mutes inactive components.
 
 ---
@@ -122,7 +125,7 @@ The most complex interaction layer, designed to handle "Gemini Live" bidirection
 ### The Backend (FastAPI + AI Agents)
 
 * **`/backend/main.py` & `/gateway`:** REST/WS controllers routing traffic into the simulation.
-* **`/backend/agents`:** Isolated Python classes inheriting from a `BaseCrisisAgent`. Each agent maintains its own localized prompt memory and connects to Google's GenAI SDK independently to reason about incoming inputs.
+* **`/backend/agents`:** Isolated Python classes inheriting from a `BaseCrisisAgent`. Each agent maintains its own localized prompt memory and connects to Z.AI GLM via the OpenAI SDK independently to reason about incoming inputs.
 * **State Store (Firestore/Mock Database):** The centralized ledger mapping the state of the session, agent decisions, and historical actions, allowing for immediate session recovery and performance observability.
 
 ```mermaid
@@ -163,7 +166,7 @@ To run the full stack locally for development:
 
 * Node.js (v18+)
 * Python 3.10+
-* Requested API Keys (Google GenAI, ElevenLabs, LiveKit) specified in `./backend/.env`
+* Requested API Keys (Z.AI, ElevenLabs, LiveKit) specified in `./backend/.env`
 
 ### Run the Backend
 

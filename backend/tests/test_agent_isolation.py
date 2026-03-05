@@ -61,8 +61,8 @@ def mock_scenario():
 class TestAgentIsolation:
     """Tests for ONE AGENT = ONE SESSION = ONE FIRESTORE COLLECTION."""
 
-    def test_agents_have_separate_session_services(self, mock_scenario):
-        """Each agent must have its own InMemorySessionService instance."""
+    def test_agents_have_separate_identities(self, mock_scenario):
+        """Each agent must have a unique agent_id and separate audio queues."""
         from agents.base_crisis_agent import CrisisAgent
 
         agent_a = CrisisAgent(
@@ -81,8 +81,13 @@ class TestAgentIsolation:
             assigned_voice="Aoede",
         )
 
-        # ADK session IDs must be different
-        assert agent_a.adk_session_id != agent_b.adk_session_id
+        # Agent IDs must be different
+        assert agent_a.agent_id != agent_b.agent_id
+        # Audio queues must be separate instances
+        assert agent_a.audio_in_queue is not agent_b.audio_in_queue
+        assert agent_a.text_in_queue is not agent_b.text_in_queue
+        # Voices must be distinct
+        assert agent_a.assigned_voice != agent_b.assigned_voice
 
     def test_agents_have_separate_firestore_refs(self, mock_scenario):
         """Each agent's memory_ref must point to a different document."""

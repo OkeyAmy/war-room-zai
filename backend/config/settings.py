@@ -15,7 +15,17 @@ class Settings(BaseSettings):
     # GCP
     gcp_project_id: str = "war-room-dev"
     google_application_credentials: str = ""
-    google_api_key: str = ""
+
+    # Z.AI API (OpenAI-compatible)
+    zai_api_key: str = ""
+    zai_base_url: str = "https://api.z.ai/api/paas/v4/"
+
+    # Z.AI Models — all configurable via .env for easy testing
+    zai_scenario_model: str = "glm-5"       # Scenario generation, document finalization
+    zai_agent_model: str = "glm-4.7"        # Per-agent reasoning
+    zai_fast_model: str = "glm-5"           # Speaker selection, observer analysis
+    zai_vision_model: str = "glm-4.6v"      # Visual document understanding
+    zai_ocr_model: str = "glm-ocr"          # Structured text extraction
 
     # Firestore
     firestore_emulator_host: str = ""
@@ -29,19 +39,11 @@ class Settings(BaseSettings):
     pubsub_emulator_host: str = ""
     pubsub_topic: str = "war-room-events"
 
-    # Gemini Models
-    # LLM reasoning model for agent content generation.
-    text_model: str = "gemini-2.5-pro" # "gemini-3-flash-preview"
-    # Legacy realtime model (used only if voice_backend="gemini_live").
-    live_model: str = "gemini-2.5-flash-native-audio-preview-12-2025"
-
     # Voice backend:
-    # - "livekit_elevenlabs": ElevenLabs STT/TTS via LiveKit plugins + Gemini LLM
-    # - "gemini_live": legacy direct Gemini native audio websocket
+    # - "livekit_elevenlabs": ElevenLabs STT/TTS via LiveKit plugins + Z.AI text LLM
     voice_backend: str = "livekit_elevenlabs"
     # Temporary stabilization mode: only one agent is allowed to speak.
     # Set to False to re-enable multi-agent autonomous voice.
-    # MULTI-AGENT: changed default from True to False for 4-agent mode
     single_agent_voice_mode: bool = False
     # Optional explicit agent role_key or agent_id for the single speaking agent.
     # If empty, the first generated roster agent is used.
@@ -49,7 +51,7 @@ class Settings(BaseSettings):
 
     # ElevenLabs
     elevenlabs_api_key: str = ""
-    elevenlabs_stt_model: str = "scribe_v2_realtime" # "scribe_v1"
+    elevenlabs_stt_model: str = "scribe_v2_realtime"
     elevenlabs_tts_model: str = "eleven_turbo_v2_5"
 
     # LiveKit (server API)
@@ -58,7 +60,6 @@ class Settings(BaseSettings):
     livekit_api_secret: str = ""
 
     # Session config
-    # MULTI-AGENT: changed default from 1 to 4 for 4-agent mode
     max_agents_per_session: int = 5
     session_timeout_minutes: int = 45
     escalation_score_penalty: int = -8
@@ -75,11 +76,6 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Cached settings singleton."""
     s = Settings()
-    # Export critical env vars so Google SDKs (ADK, genai) can find them.
-    # pydantic-settings reads .env into Python attrs but does NOT set os.environ,
-    # which the google.genai.Client constructor requires.
-    if s.google_api_key:
-        os.environ.setdefault("GOOGLE_API_KEY", s.google_api_key)
     if s.google_application_credentials:
         os.environ.setdefault(
             "GOOGLE_APPLICATION_CREDENTIALS", s.google_application_credentials

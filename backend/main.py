@@ -63,8 +63,8 @@ async def lifespan(app: FastAPI):
     """Application lifespan — startup and shutdown hooks."""
     settings = get_settings()
     logger.info(f"WAR ROOM Backend starting (debug={settings.debug})")
-    logger.info(f"Text model: {settings.text_model}")
-    logger.info(f"Live model: {settings.live_model}")
+    logger.info(f"LLM: Z.AI agent_model={settings.zai_agent_model}, scenario_model={settings.zai_scenario_model}")
+    logger.info(f"Z.AI base_url={settings.zai_base_url}, api_key={'set' if settings.zai_api_key else 'missing'}")
     logger.info(
         "Voice runtime config: "
         f"voice_backend={settings.voice_backend}, "
@@ -83,9 +83,9 @@ app = FastAPI(
     title="⚔️ WAR ROOM — Backend API",
     description=(
         "Multi-agent AI crisis simulation platform. "
-        "Powered by Google ADK, Gemini Live API, and Firestore."
+        "Powered by Z.AI GLM, LiveKit ElevenLabs, and Firestore."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -461,19 +461,27 @@ async def health_check():
     env = settings.environment
     checks: dict[str, dict] = {}
 
-    async def check_gemini_text():
+    async def check_zai_text():
         try:
-            from google import genai
-            client = genai.Client(api_key=settings.google_api_key) if settings.google_api_key else genai.Client()
-            model_info = client.models.get(model=settings.text_model)
-            if model_info and model_info.name:
-                return {
-                    "status": "pass",
-                    "message": f"Model reachable: {model_info.display_name or model_info.name}",
-                }
-            return {"status": "fail", "message": "Model returned empty info"}
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=settings.zai_api_key,
+                base_url=settings.zai_base_url,
+            )
+            if not settings.zai_api_key:
+                return {"status": "warn", "message": "ZAI_API_KEY not set — LLM calls will be skipped"}
+            response = client.chat.completions.create(
+                model=settings.zai_agent_model,
+                messages=[{"role": "user", "content": "Respond with exactly: PING_OK"}],
+                max_tokens=10,
+            )
+            reply = (response.choices[0].message.content or "").strip()
+            return {
+                "status": "pass",
+                "message": f"Z.AI GLM reachable ({settings.zai_agent_model}), reply: {reply[:30]}",
+            }
         except ImportError:
-            return {"status": "warn", "message": "google-genai SDK not installed"}
+            return {"status": "warn", "message": "openai SDK not installed"}
         except Exception as e:
             status = "warn" if env == "development" else "fail"
             return {"status": status, "message": str(e)}
@@ -612,7 +620,7 @@ async def health_check():
             return {"status": "fail", "message": str(e)}
 
     results = await asyncio.gather(
-        check_gemini_text(),
+        check_zai_text(),
         check_database(),
         check_event_system(),
         check_agent_memory(),
@@ -627,7 +635,7 @@ async def health_check():
     )
 
     check_names = [
-        "gemini_text_model",
+        "zai_text_model",
         "database",
         "event_system",
         "agent_memory",
@@ -676,10 +684,10 @@ async def health_check():
 @app.get(
     "/api/voices",
     tags=["System"],
-    summary="List available Gemini HD voices",
+    summary="List available ElevenLabs voices",
 )
 async def list_voices():
-    """List available Gemini HD voices — fetched from SDK with fallback."""
+    """List available ElevenLabs voices with fallback."""
     from utils.voice_discovery import discover_voices, get_voice_style_map
 
     voices = await discover_voices()

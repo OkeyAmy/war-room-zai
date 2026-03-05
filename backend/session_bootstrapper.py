@@ -4,6 +4,7 @@ Called as a background task after POST /api/sessions.
 The initial Firestore document already exists; this function runs
 the Scenario Analyst, assembles agents, and transitions the session
 from "assembling" → "briefing" → ready.
+Uses Z.AI GLM via OpenAI SDK for all LLM calls.
 """
 
 from __future__ import annotations
@@ -212,7 +213,7 @@ async def bootstrap_session(
             },
             "providers": {
                 "stt": "elevenlabs",
-                "llm": "google_gemini",
+                "llm": "zai_glm",
                 "tts": "elevenlabs",
             },
             "turn_detection": {
@@ -308,7 +309,7 @@ async def bootstrap_session(
             role_title=agent_config["role_title"],
             assigned_voice=voice,
             skill_md=skill_md,
-            text_model=settings.text_model,
+            text_model=settings.zai_agent_model,
             stt_model=settings.elevenlabs_stt_model,
             tts_model=settings.elevenlabs_tts_model,
             crisis_brief=scenario.get("crisis_brief", ""),
@@ -324,8 +325,6 @@ async def bootstrap_session(
             turn_manager=tm,
             livekit_session_config=livekit_session_config,
         )
-        agent.initialize_adk()
-
         # Open Live voice session
         await agent.initialize_live_session()
         logger.info(
@@ -383,7 +382,7 @@ async def bootstrap_session(
             "previous_statements": [],
             "public_positions": {},
             "contradictions_detected": 0,
-            "adk_session_id": agent.adk_session_id,
+            "adk_session_id": str(uuid.uuid4()),
             "voice_name": voice,
             "voice_session_active": True,
             "livekit_agent_session": livekit_session_config,
@@ -579,7 +578,7 @@ async def bootstrap_session(
                 logger.warning(f"Failed to send briefing to {role_key}: {e}")
 
             # Wait for the agent to finish speaking before moving to the next.
-            # The TurnManager lock will be acquired by _receive_from_gemini
+            # The TurnManager lock will be acquired by the livekit voice loop
             # when the agent starts speaking, and released when done.
             # We poll until the floor is free (max 20s per agent).
             for _ in range(40):

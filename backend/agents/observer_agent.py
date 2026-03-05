@@ -3,10 +3,13 @@ WAR ROOM — Observer Agent
 Silent agent — no voice, no speaking. Watches all transcripts and
 Firestore state. Outputs insights (contradictions, alliances, blind spots)
 and trust score adjustments.
+
+Uses Z.AI GLM via OpenAI-compatible SDK.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 import logging
@@ -99,13 +102,6 @@ class ObserverAgent:
         # Firestore client
         self._db = None
 
-        # ADK components (optional — works without ADK for local dev)
-        self.session_service = None
-        self.llm = None
-        self.runner = None
-
-        self._initialized = False
-
     @property
     def db(self):
         if self._db is None:
@@ -113,39 +109,8 @@ class ObserverAgent:
             self._db = _get_db()
         return self._db
 
-    def _ensure_initialized(self):
-        """Lazy-init ADK components."""
-        if self._initialized:
-            return
-
-        try:
-            from google.adk.agents import LlmAgent
-            from google.adk.runners import Runner
-            from google.adk.sessions import InMemorySessionService
-
-            settings = get_settings()
-            self.session_service = InMemorySessionService()
-
-            self.llm = LlmAgent(
-                name="ObserverAgent",
-                model=settings.text_model,
-                instruction=OBSERVER_INSTRUCTION,
-            )
-
-            self.runner = Runner(
-                agent=self.llm,
-                app_name=f"observer_{self.session_id}",
-                session_service=self.session_service,
-            )
-
-        except ImportError:
-            logger.warning("ADK not available — Observer in local-dev mode")
-
-        self._initialized = True
-
     async def start_watching(self):
         """Start the Observer's Firestore listener (called at session boot)."""
-        self._ensure_initialized()
         logger.info(f"Observer Agent watching session {self.session_id}")
 
     async def analyze_statement(
@@ -164,12 +129,12 @@ class ObserverAgent:
             transcript: What the agent said.
 
         Returns:
-            The Observer's analysis dict, or None if ADK unavailable.
+            The Observer's analysis dict, or None if unavailable.
         """
         from utils.events import push_event
         from utils.firestore_helpers import update_posture, update_resolution_score
 
-        self._ensure_initialized()
+        settings = get_settings()
 
         # Gather context (READ ONLY)
         memory_doc = await self.db.collection(COLLECTION_AGENT_MEMORY) \
@@ -182,63 +147,51 @@ class ObserverAgent:
 
         # Run Observer LLM analysis
         output = None
-        if self.runner:
+        if settings.zai_api_key:
             try:
-                from google.genai import types
+                from openai import OpenAI
 
-                # runner.run_async() returns an AsyncGenerator — iterate events
-                # Create session first — ADK requires it to exist
-                observer_session_id = f"observer_{session_id}_{agent_id}"
-                try:
-                    await self.session_service.create_session(
-                        app_name=f"observer_{self.session_id}",
-                        user_id="system",
-                        session_id=observer_session_id,
-                    )
-                except Exception as e:
-                    # Reuse existing ADK observer session if it already exists.
-                    if "already exists" not in str(e).lower():
-                        raise
+                client = OpenAI(
+                    api_key=settings.zai_api_key,
+                    base_url=settings.zai_base_url,
+                )
 
-                final_response_text = ""
-                async for event in self.runner.run_async(
-                    user_id="system",
-                    session_id=observer_session_id,
-                    new_message=types.Content(
-                        role="user",
-                        parts=[types.Part(text=json.dumps({
-                            "agent_id": agent_id,
-                            "new_statement": transcript,
-                            "previous_positions": memory.get("public_positions", {}),
-                            "crisis_board": {
-                                "agreed": crisis.get("agreed_decisions", []),
-                                "conflicts": crisis.get("open_conflicts", []),
-                            },
-                            "current_resolution_score": crisis.get("resolution_score", 50),
-                        }))]
-                    ),
-                ):
-                    if event.is_final_response() and event.content and event.content.parts:
-                        final_response_text = event.content.parts[0].text
+                context = json.dumps({
+                    "agent_id": agent_id,
+                    "new_statement": transcript,
+                    "previous_positions": memory.get("public_positions", {}),
+                    "crisis_board": {
+                        "agreed": crisis.get("agreed_decisions", []),
+                        "conflicts": crisis.get("open_conflicts", []),
+                    },
+                    "current_resolution_score": crisis.get("resolution_score", 50),
+                })
 
-                if final_response_text:
-                    cleaned_text = final_response_text.strip()
-                    if cleaned_text.startswith("```json"):
-                        cleaned_text = cleaned_text[7:]
-                    elif cleaned_text.startswith("```"):
-                        cleaned_text = cleaned_text[3:]
-                    if cleaned_text.endswith("```"):
-                        cleaned_text = cleaned_text[:-3]
-                    cleaned_text = cleaned_text.strip()
-                    
-                    if not cleaned_text:
-                        output = self._generate_default_analysis(transcript, agent_id)
-                    else:
-                        try:
-                            output = json.loads(cleaned_text)
-                        except json.JSONDecodeError as e:
-                            logger.error(f"Observer LLM analysis JSON error: {e}. Raw text: {final_response_text}")
-                            output = self._generate_default_analysis(transcript, agent_id)
+                response = await asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=settings.zai_fast_model,
+                    messages=[
+                        {"role": "system", "content": OBSERVER_INSTRUCTION},
+                        {"role": "user", "content": context},
+                    ],
+                    temperature=0.7,
+                    max_tokens=800,
+                    response_format={"type": "json_object"},
+                )
+
+                raw = response.choices[0].message.content or ""
+                cleaned = raw.strip()
+                # Strip accidental markdown fences
+                if cleaned.startswith("```json"):
+                    cleaned = cleaned[7:]
+                elif cleaned.startswith("```"):
+                    cleaned = cleaned[3:]
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                cleaned = cleaned.strip()
+
+                if cleaned:
+                    output = json.loads(cleaned)
                 else:
                     output = self._generate_default_analysis(transcript, agent_id)
 
@@ -272,7 +225,7 @@ class ObserverAgent:
                         "reason": output.get("trust_reason", ""),
                     })
                     break
-            
+
             if updated:
                 await self.db.collection(COLLECTION_CRISIS_SESSIONS) \
                              .document(session_id) \
@@ -288,7 +241,7 @@ class ObserverAgent:
                 "body": output.get("insight_body", ""),
                 "agents_referenced": output.get("agents_referenced", []),
             }
-            
+
             try:
                 from google.cloud import firestore as fs
                 await self.db.collection(COLLECTION_CRISIS_SESSIONS) \
@@ -322,7 +275,7 @@ class ObserverAgent:
                 from tools.crisis_board_tools import (
                     write_agreed_decision, write_open_conflict, write_critical_intel
                 )
-                
+
                 for decision in output.get("new_decisions", []):
                     await write_agreed_decision(
                         session_id=session_id,
@@ -330,7 +283,7 @@ class ObserverAgent:
                         text=decision.get("text", ""),
                         agents_agreed=decision.get("agents_agreed", [])
                     )
-                
+
                 for conflict in output.get("new_conflicts", []):
                     await write_open_conflict(
                         session_id=session_id,
@@ -339,7 +292,7 @@ class ObserverAgent:
                         agents_involved=conflict.get("agents_involved", []),
                         severity=conflict.get("severity", "medium")
                     )
-                
+
                 for intel in output.get("new_intel", []):
                     await write_critical_intel(
                         session_id=session_id,

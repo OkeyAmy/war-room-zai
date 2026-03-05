@@ -1,17 +1,14 @@
 # WAR ROOM Backend Dependencies
-google-adk
+openai
 google-cloud-firestore
 google-cloud-pubsub
-google-generativeai
-google-genai
 fastapi
 uvicorn[standard]
 websockets
 pydantic
 pydantic-settings
 python-dotenv
-livekit-agents[google,elevenlabs]
-livekit-plugins-google
+livekit-agents[elevenlabs]
 livekit-plugins-elevenlabs
 
 # Testing

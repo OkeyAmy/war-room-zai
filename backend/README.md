@@ -10,9 +10,8 @@ This document outlines the core architecture and systemic components that power 
 
 * **Framework:** FastAPI (Python 3.10+) running on Uvicorn.
 * **AI Integration:**
-* **Google GenAI SDK:** For text-based agent reasoning and scenario generation.
-* **Gemini Live API:** For real-time conversational streaming and interaction logic.
-* **ElevenLabs:** For ultra-realistic text-to-speech (TTS) voice synthesis.
+* **Z.AI GLM Models:** For text-based agent reasoning, multi-modal intake, and scenario generation. Accessed via the OpenAI Python SDK.
+* **ElevenLabs:** For rapid STT (Speech-to-Text) transcription and ultra-realistic TTS (Text-to-Speech) voice synthesis.
 * **LiveKit:** For WebRTC audio distribution and management.
 * **Database & Storage:** Google Cloud Firestore (production state management) with an in-memory mock adapter for local development and testing.
 
@@ -45,14 +44,39 @@ The simulation is driven by distinct, specialized AI agents operating concurrent
 
 ### 4. Audio Pipeline & Voice Engine (`/voice`)
 
-* Manages the complex orchestration of LiveKit sessions, Gemini API voice configurations, and ElevenLabs voice assignments (`voice_assignment.py` & `voice_routes.py`).
+* Manages the complex orchestration of LiveKit sessions, OpenAI API LLM configurations, and ElevenLabs voice assignments (`voice_assignment.py` & `voice_routes.py`).
 * It ensures that distinct, consistent voices are mapped to generated agents, creating an immersive localized audio experience while enforcing a strict gate for speaker turns to prevent voice leakage.
 
 ## Data Flow & Lifecycle
 
+```mermaid
+sequenceDiagram
+    participant UI as Next.js Frontend
+    participant GW as FastAPI (Gateway)
+    participant CH as Chairman Handler
+    participant LK as LiveKit & ElevenLabs
+    participant AG as Crisis Agent
+    participant ZAI as Z.AI GLM Models
+    participant DB as Firestore
+    
+    UI->>GW: POST /api/sessions (Init)
+    GW->>AG: Bootstrapper generates scenario
+    
+    UI->>LK: Chairman Mic Audio
+    LK->>CH: STT Transcription
+    CH->>AG: Route to appropriate Agent
+    AG->>ZAI: Prompt via OpenAI SDK
+    ZAI-->>AG: Text Response
+    AG->>DB: Record action/decision
+    DB-->>GW: State changed trigger
+    GW-->>UI: WebSocket Event (UI sync)
+    AG->>LK: Request TTS Audio
+    LK-->>UI: Stream Agent Audio
+```
+
 1. **Initialization:** The frontend requests a new session via POST `/api/sessions`. `main.py` writes an initial "assembling" state to Firestore and offloads heavy scenario generation to `session_bootstrapper.py` via background tasks.
 2. **Streaming:** The frontend establishes WebSocket connections.
-3. **Active Simulation:** The user speaks or sends directives. The `chairman_handler.py` processes this, invokes the necessary `CrisisAgent` instances, which then query context, compute responses via Google GenAI, trigger TTS streaming via ElevenLabs, and broadcast the resulting audio/transcripts back through the WebSocket gateway.
+3. **Active Simulation:** The user speaks or sends directives. The `chairman_handler.py` processes this, invokes the necessary `CrisisAgent` instances, which then query context, compute responses via Z.AI GLM using OpenAI SDK, trigger TTS streaming via ElevenLabs, and broadcast the resulting audio/transcripts back through the WebSocket gateway.
 4. **Escalations:** Concurrently, the `WorldAgent` evaluates session time and injects new variables, pushing updates directly to event streams.
 5. **Resolution:** The session concludes, shutting down background AI tasks, releasing WebSocket links, and dumping actionable scenario history to the DB for after-action reports.
 
