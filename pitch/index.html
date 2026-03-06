@@ -671,6 +671,87 @@
       color: var(--text-primary);
       margin-bottom: 4px;
     }
+
+    /* ─── MOBILE RESPONSIVENESS ─── */
+    @media (max-width: 768px) {
+      .top-bar {
+        padding: 0 12px;
+      }
+
+      .top-bar-center {
+        display: none;
+      }
+
+      .slide-body {
+        padding: 24px 20px;
+        justify-content: flex-start;
+        overflow-y: auto;
+      }
+
+      .nav-bar {
+        padding: 0 12px;
+      }
+
+      .slide-title {
+        font-size: 42px;
+        line-height: 1.1;
+      }
+
+      .slide-subtitle {
+        font-size: 16px;
+        margin-top: 12px;
+      }
+
+      .cards-grid,
+      .cards-grid-2,
+      .cards-grid-4,
+      .two-col {
+        grid-template-columns: 1fr;
+        gap: 16px;
+      }
+
+      .flow-row {
+        flex-direction: column;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .flow-arrow {
+        transform: rotate(90deg);
+        margin: 8px 0;
+      }
+
+      .metric-value {
+        font-size: 36px;
+      }
+
+      .card-title {
+        font-size: 20px;
+      }
+
+      .card-body,
+      .timeline-text,
+      .code-line,
+      .agent-role,
+      .stack-role {
+        font-size: 14px;
+      }
+
+      .agent-name,
+      .stack-name {
+        font-size: 20px;
+      }
+
+      .nav-btn {
+        margin: 0 6px;
+        padding: 6px 10px;
+        font-size: 12px;
+      }
+
+      .slide-tag {
+        font-size: 14px;
+      }
+    }
   </style>
 </head>
 
