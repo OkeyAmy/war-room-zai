@@ -6,6 +6,35 @@ The backend of the **WAR ROOM** application is a robust, asynchronous API built 
 
 This document outlines the core architecture and systemic components that power the backend simulation environment.
 
+## System Overview (For Non-Technical Audiences)
+
+*This section provides a simplified breakdown of how the WAR ROOM backend operates, designed explicitly for non-technical readers to aid their understanding. There is no disguising the fact that this is a non-technical explanation!*
+
+Think of the WAR ROOM backend as the control center of a highly coordinated team of experts. When a crisis begins, the control center immediately brings in specialized advisors (our AI Agents) tailored to the situation—such as legal experts, public relations managers, or military strategists.
+
+Here is a simplified visual of how information flows during a simulation:
+
+```mermaid
+flowchart TD
+    User([You / Decision Maker]) -->|Speaks or Types| Gateway[Control Center]
+    Gateway -->|Relays Information| Coordinator[Session Coordinator]
+    Coordinator -->|Assigns Task| Agents{Specialized AI Agents}
+    Agents -->|Think & Analyze| Brain[Z.AI Engine]
+    Brain -->|Provides Strategy| Agents
+    Agents -->|Generate Speech| VoiceTool[Voice Synthesizer]
+    VoiceTool -->|Spoken Response| User
+    Agents -->|Save Actions| Logs[(Record Keeper)]
+```
+
+### Key Concepts Discussed
+
+* **The Decision Maker:** You interact with the system by speaking or typing.
+* **The Control Center (Gateway):** Receives your input and ensures the entire platform stays perfectly synced.
+* **The Coordinator:** Acts as the meeting manager, taking your input and directing it to the right expert on the team.
+* **Specialized AI Agents:** These are the unique personas in the room. They consult their "brain" (the Z.AI Engine) to analyze the problem and formulate strategies.
+* **Voice Synthesizer:** Gives each agent a distinct, realistic voice so they can converse with you instantly.
+* **Record Keeper:** Safely stores every decision, transcript, and event so the team remembers exactly what has happened throughout the crisis.
+
 ### Core Technologies
 
 * **Framework:** FastAPI (Python 3.10+) running on Uvicorn.
