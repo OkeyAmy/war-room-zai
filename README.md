@@ -156,32 +156,44 @@ The most complex interaction layer, designed to handle bidirectional voice strea
 * **`/backend/agents`:** Isolated Python classes inheriting from a `BaseCrisisAgent`. Each agent maintains its own localized prompt memory and connects to Z.AI GLM via the OpenAI SDK independently to reason about incoming inputs.
 * **State Store (Firestore/Mock Database):** The centralized ledger mapping the state of the session, agent decisions, and historical actions, allowing for immediate session recovery and performance observability.
 
+
+The WAR ROOM application enforces a strictly isolated memory architecture for each agent, mitigating hallucinations and ensuring specialized domain focus.
+
 ```mermaid
 graph LR
-    subgraph "Isolated Agent Environment"
-        A[Legal Agent]
-        L[LlmAgent Wrapper]
-        M1[(Private Memory DB)]
-        A --- L
-        L --> M1
-    end
-    
     subgraph "Shared Crisis Context"
-        SB[(Shared Session DB)]
+        SB[(Firestore: 
+        Crisis Session DB)]
+    end
+
+    subgraph "Agent 1 Environment (e.g., Legal Base)"
+        A1[CrisisAgent Instance]
+        Z1(AI Model)
+        T1[[Agent Tools]]
+        M1[(Firestore: 
+        Private Memory)]
+        
+        A1 -- "System Prompt + Context" --> Z1
+        Z1 -- "Calls Function" --> T1
+        T1 -- "Read/Write" --> M1
     end
     
-    subgraph "Isolated Agent Environment"
-        B[PR Agent]
-        L2[LlmAgent Wrapper]
-        M2[(Private Memory DB)]
-        B --- L2
-        L2 --> M2
+    subgraph "Agent 2 Environment (e.g., PR Base)"
+        A2[CrisisAgent Instance]
+        Z2(AI Model)
+        T2[[Agent Tools]]
+        M2[(Firestore: 
+        Private Memory)]
+        
+        A2 -- "System Prompt + Context" --> Z2
+        Z2 -- "Calls Function" --> T2
+        T2 -- "Read/Write" --> M2
     end
     
-    L -- "Read/Write via Tools" --> SB
-    L2 -- "Read/Write via Tools" --> SB
+    T1 -- "Read/Write via Crisis Board Tools" --> SB
+    T2 -- "Read/Write via Crisis Board Tools" --> SB
     
-    M1 -.->|No Access| M2
+    M1 -.->|Strict Isolation: Cannot read other agents' memory| M2
 ```
 
 ---

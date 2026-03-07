@@ -40,6 +40,7 @@ flowchart TD
 * **Z.AI GLM Models:** For text-based agent reasoning, multi-modal intake, and scenario generation. Accessed via the OpenAI Python SDK.
 * **ElevenLabs:** For rapid STT (Speech-to-Text) transcription and ultra-realistic TTS (Text-to-Speech) voice synthesis.
 * **LiveKit:** For WebRTC audio distribution and management.
+* **Flock API (kimi-k2.5):** The project was also tested using the Flock API base model URL `https://api.flock.io/v1` with the `kimi-k2.5` model.
 * **Database & Storage:** Google Cloud Firestore (production state management) with an in-memory mock adapter for local development and testing.
 
 ## System Architecture
@@ -74,46 +75,7 @@ The simulation is driven by distinct, specialized AI agents operating concurrent
 * Manages the complex orchestration of LiveKit sessions, OpenAI API LLM configurations, and ElevenLabs voice assignments (`voice_assignment.py` & `voice_routes.py`).
 * It ensures that distinct, consistent voices are mapped to generated agents, creating an immersive localized audio experience while enforcing a strict gate for speaker turns to prevent voice leakage.
 
-### 5. Knowledge & Memory Architecture
 
-The WAR ROOM application enforces a strictly isolated memory architecture for each agent, mitigating hallucinations and ensuring specialized domain focus.
-
-```mermaid
-graph LR
-    subgraph "Shared Crisis Context"
-        SB[(Firestore: 
-        Crisis Session DB)]
-    end
-
-    subgraph "Agent 1 Environment (e.g., Legal Base)"
-        A1[CrisisAgent Instance]
-        Z1(AI Model)
-        T1[[Agent Tools]]
-        M1[(Firestore: 
-        Private Memory)]
-        
-        A1 -- "System Prompt + Context" --> Z1
-        Z1 -- "Calls Function" --> T1
-        T1 -- "Read/Write" --> M1
-    end
-    
-    subgraph "Agent 2 Environment (e.g., PR Base)"
-        A2[CrisisAgent Instance]
-        Z2(AI Model)
-        T2[[Agent Tools]]
-        M2[(Firestore: 
-        Private Memory)]
-        
-        A2 -- "System Prompt + Context" --> Z2
-        Z2 -- "Calls Function" --> T2
-        T2 -- "Read/Write" --> M2
-    end
-    
-    T1 -- "Read/Write via Crisis Board Tools" --> SB
-    T2 -- "Read/Write via Crisis Board Tools" --> SB
-    
-    M1 -.->|Strict Isolation: Cannot read other agents' memory| M2
-```
 
 ## Data Flow & Lifecycle
 
