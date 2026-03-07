@@ -6,9 +6,8 @@ The backend of the **WAR ROOM** application is a robust, asynchronous API built 
 
 This document outlines the core architecture and systemic components that power the backend simulation environment.
 
-## System Overview (For Non-Technical Audiences)
+## System Overview 
 
-*This section provides a simplified breakdown of how the WAR ROOM backend operates, designed explicitly for non-technical readers to aid their understanding. There is no disguising the fact that this is a non-technical explanation!*
 
 Think of the WAR ROOM backend as the control center of a highly coordinated team of experts. When a crisis begins, the control center immediately brings in specialized advisors (our AI Agents) tailored to the situation—such as legal experts, public relations managers, or military strategists.
 
